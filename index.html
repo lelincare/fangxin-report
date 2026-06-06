@@ -1,524 +1,440 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>芳心居家 個案數據分析</title>
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
-  <script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
-  <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Noto Sans TC', 'Microsoft JhengHei', sans-serif; background: #f8fafc; }
-    button { font-family: inherit; }
-    textarea { font-family: inherit; }
-  </style>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>芳心居家 個案數據分析</title>
+<script src="https://unpkg.com/react@18.2.0/umd/react.development.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.development.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.js"></script>
+<script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
+<script src="https://unpkg.com/chart.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Microsoft JhengHei','Noto Sans TC',sans-serif;background:#f8fafc;color:#1e293b}
+button,textarea,input{font-family:inherit}
+canvas{max-width:100%}
+</style>
 </head>
 <body>
-  <div id="root"></div>
-  <script type="text/babel">
-    const { useState, useCallback, useMemo } = React;
-    const RC = window.Recharts || Recharts;
-    const { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart } = RC;
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const {useState,useCallback,useMemo,useEffect,useRef}=React;
 
-    const PII_COLS = new Set(["姓名","身分證字號","居督","主責服務員","服務人員",
-      "居所電話","手機","通訊地址","戶籍地址","照管中心案號",
-      "案件編號","個案編號","修改者姓名","通訊村里","戶籍村里",
-      "通訊路段","戶籍路段","通訊郵遞區號","戶籍郵遞區號","工作經歷","發病前職業"]);
+const PII=new Set(["姓名","身分證字號","居督","主責服務員","服務人員","居所電話","手機","通訊地址","戶籍地址","照管中心案號","案件編號","個案編號","修改者姓名","通訊村里","戶籍村里","通訊路段","戶籍路段","通訊郵遞區號","戶籍郵遞區號","工作經歷","發病前職業"]);
+const normN=s=>String(s).replace(/[\s\u3000\u00a0\ufeff]/g,"").trim();
 
-    function anonymize(rows) {
-      return rows.map(r => {
-        const out = {};
-        Object.keys(r).forEach(k => { if (!PII_COLS.has(k.trim())) out[k.trim()] = r[k]; });
-        return out;
-      });
+function anonymize(rows){return rows.map(r=>{const o={};Object.keys(r).forEach(k=>{if(!PII.has(k.trim()))o[k.trim()]=r[k];});return o;});}
+
+function parseDate(v){
+  if(!v)return null;
+  if(v instanceof Date)return isNaN(v)?null:v;
+  if(typeof v==="number"){const d=new Date(Math.round((v-25569)*86400*1000));return isNaN(d)?null:d;}
+  const d=new Date(String(v).trim().replace(/\//g,"-"));
+  return isNaN(d)?null:d;
+}
+function toYM(d){if(!d)return null;return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;}
+function calcAge(v){const d=parseDate(v);if(!d)return null;return new Date().getFullYear()-d.getFullYear();}
+function parseCMS(v){
+  if(!v)return null;const s=String(v).trim();
+  const m=s.match(/(\d+)/);if(m)return m[1];
+  const CN={"一":"1","二":"2","三":"3","四":"4","五":"5","六":"6","七":"7","八":"8"};
+  for(const[ch,n]of Object.entries(CN))if(s.includes(ch))return n;
+  return null;
+}
+
+function readXLS(buf){
+  const wb=XLSX.read(buf,{type:"array"});
+  const ws=wb.Sheets[wb.SheetNames[0]];
+  const r1=XLSX.utils.sheet_to_json(ws,{defval:"",range:1});
+  const r0=XLSX.utils.sheet_to_json(ws,{defval:""});
+  const k1=r1.length>0?Object.keys(r1[0])[0]:"";
+  return anonymize((k1&&!k1.startsWith("__EMPTY"))?r1:r0);
+}
+
+function computeServiceStats(rows){
+  const seen=new Set(),gD={F:0,M:0},gC={F:new Set(),M:new Set()};
+  rows.forEach(r=>{
+    const name=normN(r["服務個案"]||"");
+    const date=String(r["服務日期"]||"").trim();
+    const g=String(r["性別"]||"").trim().toUpperCase();
+    if(!name||!date)return;
+    const key=`${name}__${date}`;
+    if(!seen.has(key)){seen.add(key);const gg=g==="F"?"F":g==="M"?"M":null;if(gg){gD[gg]++;gC[gg].add(name);}}
+  });
+  const total=gD.F+gD.M;
+  const totalCases=new Set([...gC.F,...gC.M]).size;
+  return{total,totalCases,female:{days:gD.F,cases:gC.F.size},male:{days:gD.M,cases:gC.M.size}};
+}
+
+function buildMonthlyActive(allRows){
+  const ymSet=new Set();
+  allRows.forEach(r=>{
+    const om=toYM(parseDate(r["開案日期"]));
+    const cm=toYM(parseDate(r["結束(暫停)服務日期"]));
+    if(om)ymSet.add(om);if(cm)ymSet.add(cm);
+  });
+  if(ymSet.size===0)return[];
+  const months=Array.from(ymSet).sort();
+  const full=[];let cur=new Date(months[0]+"-01");const last=new Date(months[months.length-1]+"-01");
+  while(cur<=last){full.push(toYM(cur));cur.setMonth(cur.getMonth()+1);}
+  return full.map(ym=>{
+    const end=new Date(new Date(ym+"-01").getFullYear(),new Date(ym+"-01").getMonth()+1,0);
+    let total=0,male=0,female=0,newCase=0;
+    allRows.forEach(r=>{
+      const openD=parseDate(r["開案日期"]);const closeD=parseDate(r["結束(暫停)服務日期"]);
+      if(toYM(openD)===ym)newCase++;
+      if(openD&&openD<=end&&(!closeD||closeD>end)){total++;const g=String(r["性別"]||"").trim();if(g==="男")male++;else if(g==="女")female++;}
+    });
+    return{month:ym,在案總數:total,新增:newCase,男:male,女:female};
+  });
+}
+
+function computeStats(rows){
+  const cms={},cr={},gender={},age={"60以下":0,"60-69":0,"70-79":0,"80-89":0,"90+":0},st={},dist={};
+  rows.forEach(r=>{
+    const s=String(r["服務狀態"]||"").trim()||"未知";st[s]=(st[s]||0)+1;
+    const c=String(r["結案(暫停)原因"]||"").trim();if(c)cr[c]=(cr[c]||0)+1;
+    if(s==="服務中"){
+      const lv=parseCMS(r["CMS等級"])||"未知";cms[lv]=(cms[lv]||0)+1;
+      const g=String(r["性別"]||"").trim()||"未知";gender[g]=(gender[g]||0)+1;
+      const a=calcAge(r["生日"]);
+      if(a!==null){if(a<60)age["60以下"]++;else if(a<70)age["60-69"]++;else if(a<80)age["70-79"]++;else if(a<90)age["80-89"]++;else age["90+"]++;}
+      const d=String(r["通訊鄉鎮區"]||"").trim();if(d)dist[d]=(dist[d]||0)+1;
     }
+  });
+  const cmsData=Object.entries(cms).filter(([k])=>k!=="未知"&&k!=="").sort((a,b)=>Number(a[0])-Number(b[0])).map(([n,v])=>({name:`第${n}級`,value:v}));
+  const closeData=Object.entries(cr).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([n,v])=>({name:n,value:v}));
+  const ageData=Object.entries(age).map(([n,v])=>({name:n,value:v}));
+  const genderData=Object.entries(gender).map(([n,v])=>({name:n,value:v}));
+  const distData=Object.entries(dist).sort((a,b)=>b[1]-a[1]).map(([n,v])=>({name:n,value:v}));
+  return{cmsData,closeData,ageData,genderData,distData,statusCount:st,cmsCount:cms};
+}
 
-    function parseDate(v) {
-      if (!v) return null;
-      if (v instanceof Date) return isNaN(v) ? null : v;
-      if (typeof v === "number") { const d = new Date(Math.round((v-25569)*86400*1000)); return isNaN(d)?null:d; }
-      const s = String(v).trim().replace(/\//g,"-");
-      const d = new Date(s);
-      return isNaN(d) ? null : d;
-    }
+// Chart.js 圖表元件
+function ChartCanvas({type,data,options,h=280}){
+  const ref=useRef();const chartRef=useRef();
+  useEffect(()=>{
+    if(!ref.current)return;
+    if(chartRef.current)chartRef.current.destroy();
+    chartRef.current=new Chart(ref.current,{type,data,options:{responsive:true,maintainAspectRatio:false,...options}});
+    return()=>{if(chartRef.current)chartRef.current.destroy();};
+  },[JSON.stringify(data)]);
+  return React.createElement('div',{style:{height:h}},React.createElement('canvas',{ref}));
+}
 
-    function toYM(d) {
-      if (!d) return null;
-      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
-    }
+const COLORS=["#2563eb","#16a34a","#dc2626","#d97706","#7c3aed","#0891b2","#be185d","#65a30d"];
 
-    function calcAge(v) {
-      const d = parseDate(v);
-      if (!d) return null;
-      return new Date().getFullYear() - d.getFullYear();
-    }
+function App(){
+  const [activeRows,setActiveRows]=useState(null);
+  const [closedRows,setClosedRows]=useState(null);
+  const [stats,setStats]=useState(null);
+  const [trend,setTrend]=useState([]);
+  const [serviceRows,setServiceRows]=useState(null);
+  const [serviceStats,setServiceStats]=useState(null);
+  const [activeNames,setActiveNames]=useState(new Set());
+  const [closedNames,setClosedNames]=useState(new Set());
+  const [fileNames,setFileNames]=useState({active:"",closed:"",service:""});
+  const [tab,setTab]=useState("trend");
+  const [aiResult,setAiResult]=useState("");
+  const [question,setQuestion]=useState("請分析個案數據的主要趨勢，針對在案人數變化、男女比例及CMS等級分佈提供管理建議。");
+  const [loading,setLoading]=useState(false);
 
-    function parseCMS(v) {
-      if (!v) return null;
-      const s = String(v).trim();
-      const m = s.match(/(\d+)/);
-      if (m) return m[1];
-      const CN={"一":"1","二":"2","三":"3","四":"4","五":"5","六":"6","七":"7","八":"8"};
-      for (const [ch,n] of Object.entries(CN)) if (s.includes(ch)) return n;
-      return null;
-    }
+  const process=useCallback((aRows,cRows,aName,cName)=>{
+    const all=[...aRows,...cRows];
+    setActiveRows(aRows);setClosedRows(cRows);
+    setStats(computeStats(all));setTrend(buildMonthlyActive(all));
+    setAiResult("");setFileNames(p=>({...p,active:aName,closed:cName}));
+  },[]);
 
-    function readXLS(buffer) {
-      const wb = XLSX.read(buffer, {type:"array"});
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const tryRange1 = XLSX.utils.sheet_to_json(ws, {defval:"", range:1});
-      const tryRange0 = XLSX.utils.sheet_to_json(ws, {defval:""});
-      const firstKey1 = tryRange1.length > 0 ? Object.keys(tryRange1[0])[0] : "";
-      const data = (firstKey1 && !firstKey1.startsWith("__EMPTY") && firstKey1 !== "") ? tryRange1 : tryRange0;
-      return anonymize(data);
-    }
+  const onActive=useCallback(e=>{
+    const f=e.target.files[0];if(!f)return;
+    const r=new FileReader();r.onload=ev=>{
+      const wb=XLSX.read(ev.target.result,{type:"array"});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const raw=XLSX.utils.sheet_to_json(ws,{defval:"",range:1});
+      setActiveNames(new Set(raw.map(r=>normN(r["姓名"]||"")).filter(Boolean)));
+      process(anonymize(raw),closedRows||[],f.name,fileNames.closed);
+    };r.readAsArrayBuffer(f);
+  },[closedRows,fileNames.closed,process]);
 
-    function computeServiceStats(rows) {
-      const seen = new Set();
-      const genderDays = { F:0, M:0, 其他:0 };
-      const genderCases = { F:new Set(), M:new Set(), 其他:new Set() };
-      const normName = s => String(s).replace(/[\s\u3000\u00a0\ufeff]/g,"").trim();
-      rows.forEach(r => {
-        const name = normName(r["服務個案"]||"");
-        const date = String(r["服務日期"]||"").trim();
-        const gender = String(r["性別"]||"").trim().toUpperCase();
-        if (!name || !date) return;
-        const key = `${name}__${date}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          const g = gender === "F" ? "F" : gender === "M" ? "M" : "其他";
-          genderDays[g]++;
-          genderCases[g].add(name);
-        }
-      });
-      const totalDays = genderDays.F + genderDays.M + genderDays.其他;
-      const totalCases = new Set([...genderCases.F, ...genderCases.M, ...genderCases.其他]).size;
-      return { totalDays, totalCases, female:{days:genderDays.F,cases:genderCases.F.size}, male:{days:genderDays.M,cases:genderCases.M.size} };
-    }
+  const onClosed=useCallback(e=>{
+    const f=e.target.files[0];if(!f)return;
+    const r=new FileReader();r.onload=ev=>{
+      const wb=XLSX.read(ev.target.result,{type:"array"});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const raw=XLSX.utils.sheet_to_json(ws,{defval:"",range:1});
+      setClosedNames(new Set(raw.map(r=>normN(r["姓名"]||"")).filter(Boolean)));
+      process(activeRows||[],anonymize(raw),fileNames.active,f.name);
+    };r.readAsArrayBuffer(f);
+  },[activeRows,fileNames.active,process]);
 
-    function buildMonthlyActive(allRows) {
-      const ymSet = new Set();
-      allRows.forEach(r => {
-        const om = toYM(parseDate(r["開案日期"]));
-        const cm = toYM(parseDate(r["結束(暫停)服務日期"]));
-        if (om) ymSet.add(om);
-        if (cm) ymSet.add(cm);
-      });
-      if (ymSet.size === 0) return [];
-      const months = Array.from(ymSet).sort();
-      const full = [];
-      let cur = new Date(months[0]+"-01");
-      const last = new Date(months[months.length-1]+"-01");
-      while (cur <= last) { full.push(toYM(cur)); cur.setMonth(cur.getMonth()+1); }
-      return full.map(ym => {
-        const ymDate = new Date(ym+"-01");
-        const endOfMonth = new Date(ymDate.getFullYear(), ymDate.getMonth()+1, 0);
-        let total=0, male=0, female=0, newCase=0;
-        allRows.forEach(r => {
-          const openD = parseDate(r["開案日期"]);
-          const closeD = parseDate(r["結束(暫停)服務日期"]);
-          const openM = toYM(openD);
-          if (openM === ym) newCase++;
-          if (openD && openD <= endOfMonth) {
-            if (!closeD || closeD > endOfMonth) {
-              total++;
-              const g = String(r["性別"]||"").trim();
-              if (g === "男") male++;
-              else if (g === "女") female++;
-            }
-          }
-        });
-        return { month:ym, 在案總數:total, 新增:newCase, 男:male, 女:female };
-      });
-    }
+  const onService=useCallback(e=>{
+    const f=e.target.files[0];if(!f)return;
+    const r=new FileReader();r.onload=ev=>{
+      const wb=XLSX.read(ev.target.result,{type:"array"});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      let rows=XLSX.utils.sheet_to_json(ws,{defval:"",range:2});
+      const k=rows.length>0?Object.keys(rows[0])[0]:"";
+      if(!k||k.startsWith("__EMPTY"))rows=XLSX.utils.sheet_to_json(ws,{defval:"",range:1});
+      setServiceRows(rows);setServiceStats(computeServiceStats(rows));
+      setFileNames(p=>({...p,service:f.name}));
+    };r.readAsArrayBuffer(f);
+  },[]);
 
-    function computeStats(rows) {
-      const cmsCount={}, closeReason={}, genderCount={};
-      const ageGroups={"60以下":0,"60-69":0,"70-79":0,"80-89":0,"90+":0};
-      const statusCount={}, districtCount={};
-      rows.forEach(r => {
-        const st = String(r["服務狀態"]||"").trim() || "未知";
-        statusCount[st]=(statusCount[st]||0)+1;
-        const isActive = st === "服務中";
-        const cr = String(r["結案(暫停)原因"]||"").trim();
-        if (cr) closeReason[cr]=(closeReason[cr]||0)+1;
-        if (isActive) {
-          const cms = parseCMS(r["CMS等級"]) || "未知";
-          cmsCount[cms] = (cmsCount[cms]||0)+1;
-          const g = String(r["性別"]||"").trim() || "未知";
-          genderCount[g]=(genderCount[g]||0)+1;
-          const age = calcAge(r["生日"]);
-          if (age!==null) {
-            if (age<60) ageGroups["60以下"]++;
-            else if (age<70) ageGroups["60-69"]++;
-            else if (age<80) ageGroups["70-79"]++;
-            else if (age<90) ageGroups["80-89"]++;
-            else ageGroups["90+"]++;
-          }
-          const dist = String(r["通訊鄉鎮區"]||"").trim();
-          if (dist) districtCount[dist]=(districtCount[dist]||0)+1;
-        }
-      });
-      const cmsData = Object.entries(cmsCount).filter(([k])=>k!=="未知"&&k!=="").sort((a,b)=>Number(a[0])-Number(b[0])).map(([n,v])=>({name:`第${n}級`,value:v}));
-      const closeData = Object.entries(closeReason).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([n,v])=>({name:n,value:v}));
-      const ageData = Object.entries(ageGroups).map(([n,v])=>({name:n,value:v}));
-      const genderData = Object.entries(genderCount).map(([n,v])=>({name:n,value:v}));
-      const districtData = Object.entries(districtCount).sort((a,b)=>b[1]-a[1]).map(([n,v])=>({name:n,value:v}));
-      return {cmsData,closeData,ageData,genderData,districtData,statusCount,cmsCount,total:rows.length};
-    }
+  const dataMonth=useMemo(()=>{
+    const all=[...(activeRows||[]),...(closedRows||[])];
+    let latest=null;
+    all.forEach(r=>{const d=parseDate(r["開案日期"]);if(d&&(!latest||d>latest))latest=d;});
+    if(!latest)return null;
+    return`${latest.getFullYear()}年${latest.getMonth()+1}月`;
+  },[activeRows,closedRows]);
 
-    const COLORS=["#2563eb","#16a34a","#dc2626","#d97706","#7c3aed","#0891b2","#be185d","#65a30d"];
-
-    function App() {
-      const [activeRows, setActiveRows] = useState(null);
-      const [closedRows, setClosedRows] = useState(null);
-      const [stats, setStats] = useState(null);
-      const [trend, setTrend] = useState([]);
-      const [aiResult, setAiResult] = useState("");
-      const [question, setQuestion] = useState("請分析個案數據的主要趨勢，針對在案人數變化、男女比例及CMS等級分佈提供管理建議。");
-      const [loading, setLoading] = useState(false);
-      const [tab, setTab] = useState("trend");
-      const [fileNames, setFileNames] = useState({active:"", closed:"", service:""});
-      const [serviceRows, setServiceRows] = useState(null);
-      const [serviceStats, setServiceStats] = useState(null);
-      const [activeNames, setActiveNames] = useState(new Set());
-      const [closedNames, setClosedNames] = useState(new Set());
-
-      const processFiles = useCallback((aRows, cRows, aName, cName) => {
-        const all = [...aRows, ...cRows];
-        const s = computeStats(all);
-        const t = buildMonthlyActive(all);
-        setActiveRows(aRows); setClosedRows(cRows);
-        setStats(s); setTrend(t); setAiResult("");
-        setFileNames(prev => ({...prev, active:aName, closed:cName}));
-      }, []);
-
-      const onActiveFile = useCallback((e) => {
-        const file = e.target.files[0]; if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-          const wb = XLSX.read(ev.target.result, {type:"array"});
-          const ws = wb.Sheets[wb.SheetNames[0]];
-          const raw = XLSX.utils.sheet_to_json(ws, {defval:"", range:1});
-          setActiveNames(new Set(raw.map(r => String(r["姓名"]||"").replace(/[\s\u3000\u00a0\ufeff]/g,"").trim()).filter(Boolean)));
-          const rows = anonymize(raw);
-          processFiles(rows, closedRows||[], file.name, fileNames.closed);
-        };
-        reader.readAsArrayBuffer(file);
-      }, [closedRows, fileNames.closed, processFiles]);
-
-      const onClosedFile = useCallback((e) => {
-        const file = e.target.files[0]; if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-          const wb = XLSX.read(ev.target.result, {type:"array"});
-          const ws = wb.Sheets[wb.SheetNames[0]];
-          const raw = XLSX.utils.sheet_to_json(ws, {defval:"", range:1});
-          setClosedNames(new Set(raw.map(r => String(r["姓名"]||"").replace(/[\s\u3000\u00a0\ufeff]/g,"").trim()).filter(Boolean)));
-          const rows = anonymize(raw);
-          processFiles(activeRows||[], rows, fileNames.active, file.name);
-        };
-        reader.readAsArrayBuffer(file);
-      }, [activeRows, fileNames.active, processFiles]);
-
-      const onServiceFile = useCallback((e) => {
-        const file = e.target.files[0]; if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-          const wb = XLSX.read(ev.target.result, {type:"array"});
-          const ws = wb.Sheets[wb.SheetNames[0]];
-          let rows = XLSX.utils.sheet_to_json(ws, {defval:"", range:2});
-          const firstKey = rows.length > 0 ? Object.keys(rows[0])[0] : "";
-          if (!firstKey || firstKey.startsWith("__EMPTY")) rows = XLSX.utils.sheet_to_json(ws, {defval:"", range:1});
-          setServiceRows(rows);
-          setServiceStats(computeServiceStats(rows));
-          setFileNames(prev => ({...prev, service: file.name}));
-        };
-        reader.readAsArrayBuffer(file);
-      }, []);
-
-      const dataMonth = useMemo(() => {
-        const all = [...(activeRows||[]), ...(closedRows||[])];
-        let latest = null;
-        all.forEach(r => { const d = parseDate(r["開案日期"]); if (d && (!latest || d > latest)) latest = d; });
-        if (!latest) return null;
-        return `${latest.getFullYear()}年${latest.getMonth()+1}月`;
-      }, [activeRows, closedRows]);
-
-      const onAnalyze = async () => {
-        if (!stats) return;
-        setLoading(true); setAiResult("");
-        const last6 = trend.slice(-6);
-        const summary = `【芳心居家長照 個案統計摘要（已去識別化）】
-總個案數：${activeNames.size} 累積結案：${closedNames.size}
-CMS等級：${Object.entries(stats.cmsCount).filter(([k])=>k&&k!=="未知").map(([k,v])=>`第${k}級:${v}人`).join("、")}
-近6個月趨勢：${last6.map(m=>`${m.month}在案${m.在案總數}人(男${m.男}/女${m.女})新增${m.新增}`).join(" | ")}
+  const onAnalyze=async()=>{
+    if(!stats)return;setLoading(true);setAiResult("");
+    const last6=trend.slice(-6);
+    const summary=`【芳心居家長照個案統計摘要（已去識別化）】
+總在案：${activeNames.size} 累積結案：${closedNames.size}
+CMS：${Object.entries(stats.cmsCount).filter(([k])=>k&&k!=="未知").map(([k,v])=>`第${k}級:${v}人`).join("、")}
+近6月：${last6.map(m=>`${m.month}在案${m.在案總數}(男${m.男}/女${m.女})新增${m.新增}`).join(" | ")}
 結案原因：${stats.closeData.slice(0,5).map(d=>`${d.name}:${d.value}`).join("、")}
 年齡：${stats.ageData.map(d=>`${d.name}:${d.value}`).join("、")}`;
-        try {
-          const resp = await fetch("https://api.anthropic.com/v1/messages", {
-            method:"POST",
-            headers:{"Content-Type":"application/json","anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-            body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,
-              system:"你是長期照顧機構的數據分析顧問，用繁體中文回答，條理清晰並提供具體建議。",
-              messages:[{role:"user",content:`個案統計摘要（已去識別化）：\n${summary}\n\n請回答：${question}`}]})
-          });
-          const data = await resp.json();
-          setAiResult(data.content?.find(b=>b.type==="text")?.text || "分析失敗");
-        } catch(err) { setAiResult("❌ "+err.message); }
-        setLoading(false);
-      };
+    try{
+      const resp=await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST",
+        headers:{"Content-Type":"application/json","anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,
+          system:"你是長期照顧機構數據分析顧問，用繁體中文回答，條理清晰並提供具體建議。",
+          messages:[{role:"user",content:`統計摘要（已去識別化）：\n${summary}\n\n請回答：${question}`}]})
+      });
+      const data=await resp.json();
+      setAiResult(data.content?.find(b=>b.type==="text")?.text||"分析失敗");
+    }catch(err){setAiResult("❌ "+err.message);}
+    setLoading(false);
+  };
 
-      return (
-        <div style={{fontFamily:"inherit",background:"#f8fafc",minHeight:"100vh",color:"#1e293b"}}>
-          <div style={{background:"linear-gradient(135deg,#1e40af,#1d4ed8)",padding:"24px 32px",color:"white"}}>
-            <div style={{fontSize:22,fontWeight:700}}>📊 芳心居家 個案數據分析</div>
-            <div style={{fontSize:13,opacity:.8,marginTop:4}}>本地去識別化 → 僅統計數據傳 AI，個資不離機</div>
-          </div>
-          <div style={{maxWidth:1100,margin:"0 auto",padding:"24px 16px"}}>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,marginBottom:20}}>
-              {[
-                {label:"① 在案個案 XLS",key:"active",onChange:onActiveFile,name:fileNames.active,count:activeRows?.length},
-                {label:"② 結案個案 XLS",key:"closed",onChange:onClosedFile,name:fileNames.closed,count:closedRows?.length},
-                {label:"③ 當月服務明細 XLS",key:"service",onChange:onServiceFile,name:fileNames.service,count:serviceRows?.length},
-              ].map(f=>(
-                <div key={f.key} style={{background:"white",borderRadius:12,padding:20,border:"1px solid #e2e8f0"}}>
-                  <div style={{fontWeight:600,marginBottom:10,fontSize:14}}>{f.label}</div>
-                  <label style={{cursor:"pointer",display:"block"}}>
-                    <div style={{background:f.name?"#dcfce7":"#eff6ff",border:`2px dashed ${f.name?"#16a34a":"#93c5fd"}`,borderRadius:8,padding:"14px",textAlign:"center",fontSize:13,color:f.name?"#16a34a":"#2563eb"}}>
-                      {f.name?`✅ ${f.name}（${f.count}筆）`:"點擊上傳"}
-                    </div>
-                    <input type="file" accept=".xls,.xlsx" style={{display:"none"}} onChange={f.onChange} onClick={e=>{e.target.value=null;}}/>
-                  </label>
-                </div>
-              ))}
-            </div>
+  const card=(label,value,color)=>React.createElement('div',{style:{background:"white",borderRadius:10,padding:16,border:"1px solid #e2e8f0"}},
+    React.createElement('div',{style:{fontSize:12,color:"#64748b",marginBottom:6}},label),
+    React.createElement('div',{style:{fontSize:26,fontWeight:700,color}},value)
+  );
 
-            {stats && (<>
-              {dataMonth && <div style={{marginBottom:8,fontSize:13,color:"#2563eb",fontWeight:600}}>📅 資料月份：{dataMonth}</div>}
-              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:20}}>
-                {[
-                  {label:"總個案數（不含結案）",value:activeNames.size||0,color:"#2563eb"},
-                  {label:"累積結案數（至今）",value:closedNames.size||0,color:"#dc2626"},
-                  {label:"本月新增",value:trend.length>0?trend[trend.length-1].新增:0,color:"#16a34a"},
-                  {label:"月底在案總數",value:trend.length>0?trend[trend.length-1].在案總數:0,color:"#7c3aed"},
-                ].map((k,i)=>(
-                  <div key={i} style={{background:"white",borderRadius:10,padding:"16px",border:"1px solid #e2e8f0"}}>
-                    <div style={{fontSize:12,color:"#64748b",marginBottom:6}}>{k.label}</div>
-                    <div style={{fontSize:28,fontWeight:700,color:k.color}}>{k.value}</div>
-                  </div>
-                ))}
-              </div>
+  const uploadBox=(label,onChange,name,count)=>React.createElement('div',{style:{background:"white",borderRadius:12,padding:20,border:"1px solid #e2e8f0"}},
+    React.createElement('div',{style:{fontWeight:600,marginBottom:10,fontSize:14}},label),
+    React.createElement('label',{style:{cursor:"pointer",display:"block"}},
+      React.createElement('div',{style:{background:name?"#dcfce7":"#eff6ff",border:`2px dashed ${name?"#16a34a":"#93c5fd"}`,borderRadius:8,padding:14,textAlign:"center",fontSize:13,color:name?"#16a34a":"#2563eb"}},
+        name?`✅ ${name}（${count}筆）`:"點擊上傳"),
+      React.createElement('input',{type:"file",accept:".xls,.xlsx",style:{display:"none"},onChange,onClick:e=>{e.target.value=null;}})
+    )
+  );
 
-              <div style={{background:"white",borderRadius:12,border:"1px solid #e2e8f0",marginBottom:20}}>
-                <div style={{display:"flex",borderBottom:"1px solid #e2e8f0",padding:"0 16px",overflowX:"auto"}}>
-                  {[["trend","📈 月趨勢"],["closetrend","📉 結案趨勢"],["cms","🏷 CMS（服務中）"],["close","📋 結案原因"],["demo","👥 人口（服務中）"],["district","📍 地區（服務中）"]].map(([k,l])=>(
-                    <button key={k} onClick={()=>setTab(k)} style={{padding:"12px 14px",border:"none",background:"none",cursor:"pointer",fontWeight:tab===k?700:400,color:tab===k?"#2563eb":"#64748b",borderBottom:tab===k?"2px solid #2563eb":"2px solid transparent",fontSize:13,whiteSpace:"nowrap"}}>{l}</button>
-                  ))}
-                </div>
-                <div style={{padding:20}}>
-                  {tab==="trend" && (trend.length===0
-                    ? <div style={{color:"#94a3b8",textAlign:"center",padding:40}}>無日期資料</div>
-                    : <>
-                        <div style={{fontWeight:600,fontSize:13,marginBottom:12,color:"#475569"}}>每月底在案總數 / 當月新增 / 男女人數</div>
-                        <ResponsiveContainer width="100%" height={300}>
-                          <ComposedChart data={trend}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/>
-                            <XAxis dataKey="month" tick={{fontSize:10}}/><YAxis yAxisId="left" tick={{fontSize:11}}/><YAxis yAxisId="right" orientation="right" tick={{fontSize:11}}/>
-                            <Tooltip/><Legend/>
-                            <Bar yAxisId="right" dataKey="新增" name="當月新增" fill="#93c5fd" opacity={0.7}/>
-                            <Line yAxisId="left" type="monotone" dataKey="在案總數" name="月底在案總數" stroke="#1d4ed8" strokeWidth={3} dot={{r:3}}/>
-                            <Line yAxisId="left" type="monotone" dataKey="男" name="男" stroke="#0891b2" strokeWidth={2} dot={false} strokeDasharray="4 2"/>
-                            <Line yAxisId="left" type="monotone" dataKey="女" name="女" stroke="#be185d" strokeWidth={2} dot={false} strokeDasharray="4 2"/>
-                          </ComposedChart>
-                        </ResponsiveContainer>
-                        <div style={{marginTop:16,overflowX:"auto"}}>
-                          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-                            <thead><tr style={{background:"#f8fafc"}}>{["月份","在案總數","男","女","男女比","當月新增"].map(h=><th key={h} style={{padding:"8px 12px",textAlign:"center",borderBottom:"1px solid #e2e8f0",color:"#475569",fontWeight:600}}>{h}</th>)}</tr></thead>
-                            <tbody>{[...trend].reverse().map((r,i)=>(
-                              <tr key={i} style={{borderBottom:"1px solid #f1f5f9"}}>
-                                <td style={{padding:"8px 12px",textAlign:"center",fontWeight:600}}>{r.month}</td>
-                                <td style={{padding:"8px 12px",textAlign:"center",color:"#1d4ed8",fontWeight:700}}>{r.在案總數}</td>
-                                <td style={{padding:"8px 12px",textAlign:"center",color:"#0891b2"}}>{r.男}</td>
-                                <td style={{padding:"8px 12px",textAlign:"center",color:"#be185d"}}>{r.女}</td>
-                                <td style={{padding:"8px 12px",textAlign:"center",color:"#64748b"}}>{r.在案總數>0?`${Math.round(r.男/r.在案總數*100)}%/${Math.round(r.女/r.在案總數*100)}%`:"-"}</td>
-                                <td style={{padding:"8px 12px",textAlign:"center",color:"#16a34a"}}>{r.新增}</td>
-                              </tr>
-                            ))}</tbody>
-                          </table>
-                        </div>
-                      </>
-                  )}
+  return React.createElement('div',{style:{fontFamily:"inherit",background:"#f8fafc",minHeight:"100vh"}},
+    // Header
+    React.createElement('div',{style:{background:"linear-gradient(135deg,#1e40af,#1d4ed8)",padding:"24px 32px",color:"white"}},
+      React.createElement('div',{style:{fontSize:22,fontWeight:700}},"📊 芳心居家 個案數據分析"),
+      React.createElement('div',{style:{fontSize:13,opacity:.8,marginTop:4}},"本地去識別化 → 僅統計數據傳 AI，個資不離機")
+    ),
+    React.createElement('div',{style:{maxWidth:1100,margin:"0 auto",padding:"24px 16px"}},
+      // Upload
+      React.createElement('div',{style:{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,marginBottom:20}},
+        uploadBox("① 在案個案 XLS",onActive,fileNames.active,activeRows?.length),
+        uploadBox("② 結案個案 XLS",onClosed,fileNames.closed,closedRows?.length),
+        uploadBox("③ 當月服務明細 XLS",onService,fileNames.service,serviceRows?.length)
+      ),
 
-                  {tab==="closetrend" && (()=>{
-                    const closeByMonth={};
-                    (closedRows||[]).forEach(r=>{const m=toYM(parseDate(r["結束(暫停)服務日期"]))||toYM(parseDate(r["開案日期"]));if(m)closeByMonth[m]=(closeByMonth[m]||0)+1;});
-                    let acc=0;
-                    const closeData2=Object.keys(closeByMonth).sort().map(m=>{acc+=closeByMonth[m];return{month:m,當月結案:closeByMonth[m],累積結案:acc};});
-                    return closeData2.length===0
-                      ? <div style={{color:"#94a3b8",textAlign:"center",padding:40}}>無結案資料（請上傳結案檔案）</div>
-                      : <>
-                          <ResponsiveContainer width="100%" height={300}>
-                            <ComposedChart data={closeData2}>
-                              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/>
-                              <XAxis dataKey="month" tick={{fontSize:10}}/><YAxis yAxisId="left" tick={{fontSize:11}}/><YAxis yAxisId="right" orientation="right" tick={{fontSize:11}}/>
-                              <Tooltip/><Legend/>
-                              <Bar yAxisId="left" dataKey="當月結案" name="當月結案" fill="#fca5a5" opacity={0.8}/>
-                              <Line yAxisId="right" type="monotone" dataKey="累積結案" name="累積結案" stroke="#dc2626" strokeWidth={2.5} dot={{r:3}}/>
-                            </ComposedChart>
-                          </ResponsiveContainer>
-                          <div style={{marginTop:16,overflowX:"auto"}}>
-                            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-                              <thead><tr style={{background:"#f8fafc"}}>{["月份","當月結案","累積結案"].map(h=><th key={h} style={{padding:"8px 12px",textAlign:"center",borderBottom:"1px solid #e2e8f0",color:"#475569",fontWeight:600}}>{h}</th>)}</tr></thead>
-                              <tbody>{[...closeData2].reverse().map((r,i)=>(
-                                <tr key={i} style={{borderBottom:"1px solid #f1f5f9"}}>
-                                  <td style={{padding:"8px 12px",textAlign:"center",fontWeight:600}}>{r.month}</td>
-                                  <td style={{padding:"8px 12px",textAlign:"center",color:"#dc2626"}}>{r.當月結案}</td>
-                                  <td style={{padding:"8px 12px",textAlign:"center",color:"#7c3aed",fontWeight:700}}>{r.累積結案}</td>
-                                </tr>
-                              ))}</tbody>
-                            </table>
-                          </div>
-                        </>;
-                  })()}
+      // KPI + Charts
+      stats&&React.createElement(React.Fragment,null,
+        dataMonth&&React.createElement('div',{style:{marginBottom:8,fontSize:13,color:"#2563eb",fontWeight:600}},`📅 資料月份：${dataMonth}`),
+        React.createElement('div',{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:20}},
+          card("總個案數（不含結案）",activeNames.size||0,"#2563eb"),
+          card("累積結案數（至今）",closedNames.size||0,"#dc2626"),
+          card("本月新增",trend.length>0?trend[trend.length-1].新增:0,"#16a34a"),
+          card("月底在案總數",trend.length>0?trend[trend.length-1].在案總數:0,"#7c3aed")
+        ),
 
-                  {tab==="cms" && (stats.cmsData.length===0
-                    ? <div style={{color:"#94a3b8",textAlign:"center",padding:40}}>無CMS等級資料</div>
-                    : <ResponsiveContainer width="100%" height={280}><BarChart data={stats.cmsData}><CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/><XAxis dataKey="name" tick={{fontSize:12}}/><YAxis tick={{fontSize:11}}/><Tooltip/><Bar dataKey="value" name="人數">{stats.cmsData.map((_,i)=><Cell key={i} fill={COLORS[i%COLORS.length]}/>)}</Bar></BarChart></ResponsiveContainer>
-                  )}
+        // Tabs
+        React.createElement('div',{style:{background:"white",borderRadius:12,border:"1px solid #e2e8f0",marginBottom:20}},
+          React.createElement('div',{style:{display:"flex",borderBottom:"1px solid #e2e8f0",padding:"0 16px",overflowX:"auto"}},
+            [["trend","📈 月趨勢"],["closetrend","📉 結案趨勢"],["cms","🏷 CMS"],["close","📋 結案原因"],["demo","👥 人口"],["district","📍 地區"]].map(([k,l])=>
+              React.createElement('button',{key:k,onClick:()=>setTab(k),style:{padding:"12px 14px",border:"none",background:"none",cursor:"pointer",fontWeight:tab===k?700:400,color:tab===k?"#2563eb":"#64748b",borderBottom:tab===k?"2px solid #2563eb":"2px solid transparent",fontSize:13,whiteSpace:"nowrap"}},l)
+            )
+          ),
+          React.createElement('div',{style:{padding:20}},
+            tab==="trend"&&(trend.length===0
+              ?React.createElement('div',{style:{color:"#94a3b8",textAlign:"center",padding:40}},"無日期資料")
+              :React.createElement(React.Fragment,null,
+                React.createElement(ChartCanvas,{type:"bar",h:300,
+                  data:{
+                    labels:trend.map(d=>d.month),
+                    datasets:[
+                      {type:"line",label:"月底在案總數",data:trend.map(d=>d.在案總數),borderColor:"#1d4ed8",backgroundColor:"transparent",borderWidth:3,yAxisID:"y",tension:0.3},
+                      {type:"line",label:"男",data:trend.map(d=>d.男),borderColor:"#0891b2",backgroundColor:"transparent",borderWidth:2,yAxisID:"y",borderDash:[5,5],tension:0.3},
+                      {type:"line",label:"女",data:trend.map(d=>d.女),borderColor:"#be185d",backgroundColor:"transparent",borderWidth:2,yAxisID:"y",borderDash:[5,5],tension:0.3},
+                      {type:"bar",label:"當月新增",data:trend.map(d=>d.新增),backgroundColor:"rgba(147,197,253,0.7)",yAxisID:"y1"}
+                    ]
+                  },
+                  options:{scales:{y:{position:"left"},y1:{position:"right",grid:{drawOnChartArea:false}}},plugins:{legend:{position:"bottom"}}}
+                }),
+                React.createElement('div',{style:{marginTop:16,overflowX:"auto"}},
+                  React.createElement('table',{style:{width:"100%",borderCollapse:"collapse",fontSize:12}},
+                    React.createElement('thead',null,React.createElement('tr',{style:{background:"#f8fafc"}},...["月份","在案總數","男","女","男女比","當月新增"].map(h=>React.createElement('th',{key:h,style:{padding:"8px 12px",textAlign:"center",borderBottom:"1px solid #e2e8f0",color:"#475569",fontWeight:600}},h)))),
+                    React.createElement('tbody',null,...[...trend].reverse().map((r,i)=>React.createElement('tr',{key:i,style:{borderBottom:"1px solid #f1f5f9"}},
+                      React.createElement('td',{style:{padding:"8px 12px",textAlign:"center",fontWeight:600}},r.month),
+                      React.createElement('td',{style:{padding:"8px 12px",textAlign:"center",color:"#1d4ed8",fontWeight:700}},r.在案總數),
+                      React.createElement('td',{style:{padding:"8px 12px",textAlign:"center",color:"#0891b2"}},r.男),
+                      React.createElement('td',{style:{padding:"8px 12px",textAlign:"center",color:"#be185d"}},r.女),
+                      React.createElement('td',{style:{padding:"8px 12px",textAlign:"center",color:"#64748b"}},r.在案總數>0?`${Math.round(r.男/r.在案總數*100)}%/${Math.round(r.女/r.在案總數*100)}%`:"-"),
+                      React.createElement('td',{style:{padding:"8px 12px",textAlign:"center",color:"#16a34a"}},r.新增)
+                    )))
+                  )
+                )
+              )
+            ),
 
-                  {tab==="close" && (stats.closeData.length===0
-                    ? <div style={{color:"#94a3b8",textAlign:"center",padding:40}}>無結案資料</div>
-                    : <ResponsiveContainer width="100%" height={300}><BarChart data={stats.closeData} layout="vertical"><CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/><XAxis type="number" tick={{fontSize:11}}/><YAxis type="category" dataKey="name" tick={{fontSize:11}} width={130}/><Tooltip/><Bar dataKey="value" name="件數" fill="#7c3aed"/></BarChart></ResponsiveContainer>
-                  )}
+            tab==="closetrend"&&(()=>{
+              const cb={};(closedRows||[]).forEach(r=>{const m=toYM(parseDate(r["結束(暫停)服務日期"]))||toYM(parseDate(r["開案日期"]));if(m)cb[m]=(cb[m]||0)+1;});
+              let acc=0;const cd=Object.keys(cb).sort().map(m=>{acc+=cb[m];return{month:m,當月結案:cb[m],累積結案:acc};});
+              return cd.length===0
+                ?React.createElement('div',{style:{color:"#94a3b8",textAlign:"center",padding:40}},"無結案資料")
+                :React.createElement(ChartCanvas,{type:"bar",h:300,
+                    data:{labels:cd.map(d=>d.month),datasets:[
+                      {type:"bar",label:"當月結案",data:cd.map(d=>d.當月結案),backgroundColor:"rgba(252,165,165,0.8)",yAxisID:"y"},
+                      {type:"line",label:"累積結案",data:cd.map(d=>d.累積結案),borderColor:"#dc2626",backgroundColor:"transparent",borderWidth:2.5,yAxisID:"y1",tension:0.3}
+                    ]},
+                    options:{scales:{y:{position:"left"},y1:{position:"right",grid:{drawOnChartArea:false}}},plugins:{legend:{position:"bottom"}}}
+                  });
+            })(),
 
-                  {tab==="demo" && (
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
-                      <div>
-                        <div style={{fontWeight:600,marginBottom:10,fontSize:13}}>年齡分佈</div>
-                        <ResponsiveContainer width="100%" height={200}><BarChart data={stats.ageData}><XAxis dataKey="name" tick={{fontSize:11}}/><YAxis tick={{fontSize:11}}/><Tooltip/><Bar dataKey="value" fill="#0891b2"/></BarChart></ResponsiveContainer>
-                      </div>
-                      <div>
-                        <div style={{fontWeight:600,marginBottom:10,fontSize:13}}>性別分佈</div>
-                        <ResponsiveContainer width="100%" height={200}><PieChart><Pie data={stats.genderData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={75} label={({name,percent})=>`${name} ${(percent*100).toFixed(0)}%`}>{stats.genderData.map((_,i)=><Cell key={i} fill={COLORS[i]}/>)}</Pie><Tooltip/></PieChart></ResponsiveContainer>
-                      </div>
-                    </div>
-                  )}
+            tab==="cms"&&(stats.cmsData.length===0
+              ?React.createElement('div',{style:{color:"#94a3b8",textAlign:"center",padding:40}},"無CMS等級資料")
+              :React.createElement(ChartCanvas,{type:"bar",
+                data:{labels:stats.cmsData.map(d=>d.name),datasets:[{label:"人數",data:stats.cmsData.map(d=>d.value),backgroundColor:COLORS}]},
+                options:{plugins:{legend:{display:false}}}
+              })
+            ),
 
-                  {tab==="district" && (stats.districtData.length===0
-                    ? <div style={{color:"#94a3b8",textAlign:"center",padding:40}}>無地區資料</div>
-                    : <ResponsiveContainer width="100%" height={280}><BarChart data={stats.districtData}><CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/><XAxis dataKey="name" tick={{fontSize:12}}/><YAxis tick={{fontSize:11}}/><Tooltip/><Bar dataKey="value" name="人數" fill="#d97706"/></BarChart></ResponsiveContainer>
-                  )}
-                </div>
-              </div>
+            tab==="close"&&(stats.closeData.length===0
+              ?React.createElement('div',{style:{color:"#94a3b8",textAlign:"center",padding:40}},"無結案資料")
+              :React.createElement(ChartCanvas,{type:"bar",h:320,
+                data:{labels:stats.closeData.map(d=>d.name),datasets:[{label:"件數",data:stats.closeData.map(d=>d.value),backgroundColor:"#7c3aed"}]},
+                options:{indexAxis:"y",plugins:{legend:{display:false}}}
+              })
+            ),
 
-              <div style={{background:"white",borderRadius:12,padding:24,border:"1px solid #e2e8f0",marginBottom:20}}>
-                <div style={{fontWeight:600,marginBottom:4,fontSize:15}}>🤖 AI 分析（僅傳統計摘要，不含個資）</div>
-                <textarea value={question} onChange={e=>setQuestion(e.target.value)} rows={3} style={{width:"100%",border:"1px solid #cbd5e1",borderRadius:8,padding:"10px 12px",fontSize:13,resize:"vertical",boxSizing:"border-box",fontFamily:"inherit",marginTop:10}}/>
-                <button onClick={onAnalyze} disabled={loading} style={{marginTop:10,background:loading?"#94a3b8":"#2563eb",color:"white",border:"none",borderRadius:8,padding:"10px 24px",fontSize:14,fontWeight:600,cursor:loading?"not-allowed":"pointer"}}>
-                  {loading?"⏳ 分析中…":"🤖 送出 AI 分析"}
-                </button>
-                {aiResult && <div style={{marginTop:16,background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:8,padding:16,fontSize:13,lineHeight:1.8,whiteSpace:"pre-wrap"}}><div style={{fontWeight:600,color:"#0369a1",marginBottom:8}}>AI 分析結果</div>{aiResult}</div>}
-              </div>
-            </>)}
+            tab==="demo"&&React.createElement('div',{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}},
+              React.createElement('div',null,
+                React.createElement('div',{style:{fontWeight:600,marginBottom:10,fontSize:13}},"年齡分佈（服務中）"),
+                React.createElement(ChartCanvas,{type:"bar",h:200,
+                  data:{labels:stats.ageData.map(d=>d.name),datasets:[{label:"人數",data:stats.ageData.map(d=>d.value),backgroundColor:"#0891b2"}]},
+                  options:{plugins:{legend:{display:false}}}
+                })
+              ),
+              React.createElement('div',null,
+                React.createElement('div',{style:{fontWeight:600,marginBottom:10,fontSize:13}},"性別分佈（服務中）"),
+                React.createElement(ChartCanvas,{type:"doughnut",h:200,
+                  data:{labels:stats.genderData.map(d=>d.name),datasets:[{data:stats.genderData.map(d=>d.value),backgroundColor:COLORS}]},
+                  options:{plugins:{legend:{position:"bottom"}}}
+                })
+              )
+            ),
 
-            {serviceStats && (
-              <div style={{background:"white",borderRadius:12,border:"1px solid #e2e8f0",marginTop:20}}>
-                <div style={{borderBottom:"1px solid #e2e8f0",padding:"16px 20px",fontWeight:700,fontSize:15}}>
-                  🗓 服務人次統計 <span style={{fontSize:12,color:"#64748b",fontWeight:400,marginLeft:8}}>{fileNames.service}</span>
-                </div>
-                <div style={{padding:20}}>
-                  {activeNames.size > 0 && serviceRows && (()=>{
-                    const normN = s => s.replace(/[\s\u3000\u00a0\ufeff]/g,"").trim();
-                    const serviceNames = new Set(serviceRows.map(r=>normN(String(r["服務個案"]||""))).filter(Boolean));
-                    const activeNormMap = new Map([...activeNames].map(n=>[normN(n),n]));
-                    const inActiveNotService = [...activeNames].filter(n=>!serviceNames.has(normN(n)));
-                    const inServiceNotActive = [...serviceNames].filter(n=>![...activeNames].some(a=>normN(a)===n));
-                    const fuzzyMismatch=[];
-                    [...activeNames].forEach(n=>{
-                      const norm=normN(n);
-                      if(!serviceNames.has(norm)){
-                        const found=[...serviceNames].find(s=>normN(s)===norm);
-                        if(found) fuzzyMismatch.push({active:n,service:found});
-                      }
-                    });
-                    return (
-                      <div style={{marginBottom:20,background:"#fefce8",border:"1px solid #fde68a",borderRadius:8,padding:16}}>
-                        <div style={{fontWeight:600,fontSize:13,marginBottom:10,color:"#92400e"}}>🔍 個案姓名比對（本地運算，資料不外傳）</div>
-                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-                          <div>
-                            <div style={{fontSize:12,fontWeight:600,color:"#dc2626",marginBottom:6}}>在案但當月無服務紀錄（{inActiveNotService.length}人）</div>
-                            {inActiveNotService.length===0
-                              ? <div style={{fontSize:12,color:"#16a34a"}}>✅ 所有在案個案均有服務紀錄</div>
-                              : <div style={{fontSize:12,lineHeight:1.8}}>{inActiveNotService.map((n,i)=><span key={i} style={{display:"inline-block",background:"#fee2e2",borderRadius:4,padding:"2px 8px",margin:"2px",color:"#dc2626"}}>{n}</span>)}</div>
-                            }
-                          </div>
-                          <div>
-                            <div style={{fontSize:12,fontWeight:600,color:"#d97706",marginBottom:6}}>服務明細有但不在在案名單（{inServiceNotActive.length}人）</div>
-                            {inServiceNotActive.length===0
-                              ? <div style={{fontSize:12,color:"#16a34a"}}>✅ 無異常</div>
-                              : <div style={{fontSize:12,lineHeight:1.8}}>{inServiceNotActive.map((n,i)=><span key={i} style={{display:"inline-block",background:"#fef3c7",borderRadius:4,padding:"2px 8px",margin:"2px",color:"#d97706"}}>{n}</span>)}</div>
-                            }
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })()}
-                  <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:20}}>
-                    {[
-                      {label:"總服務人次",value:`${serviceStats.totalDays} 次`,color:"#1d4ed8"},
-                      {label:"服務總個案數",value:`${serviceStats.totalCases} 人`,color:"#7c3aed"},
-                      {label:"女性人次/個案",value:`${serviceStats.female.days}次/${serviceStats.female.cases}人`,color:"#be185d"},
-                      {label:"男性人次/個案",value:`${serviceStats.male.days}次/${serviceStats.male.cases}人`,color:"#0891b2"},
-                    ].map((k,i)=>(
-                      <div key={i} style={{background:"#f8fafc",borderRadius:10,padding:"16px",border:"1px solid #e2e8f0",textAlign:"center"}}>
-                        <div style={{fontSize:12,color:"#64748b",marginBottom:6}}>{k.label}</div>
-                        <div style={{fontSize:18,fontWeight:700,color:k.color}}>{k.value}</div>
-                      </div>
-                    ))}
-                  </div>
-                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
-                    <thead><tr style={{background:"#f1f5f9"}}>{["性別","服務人次","服務個案數","佔總人次%"].map(h=><th key={h} style={{padding:"10px 16px",textAlign:"center",borderBottom:"2px solid #e2e8f0",fontWeight:600,color:"#475569"}}>{h}</th>)}</tr></thead>
-                    <tbody>
-                      {[{g:"女性 (F)",days:serviceStats.female.days,cases:serviceStats.female.cases,color:"#be185d"},{g:"男性 (M)",days:serviceStats.male.days,cases:serviceStats.male.cases,color:"#0891b2"}].map((r,i)=>(
-                        <tr key={i} style={{borderBottom:"1px solid #f1f5f9"}}>
-                          <td style={{padding:"12px 16px",textAlign:"center",fontWeight:700,color:r.color}}>{r.g}</td>
-                          <td style={{padding:"12px 16px",textAlign:"center",fontSize:18,fontWeight:700}}>{r.days} 次</td>
-                          <td style={{padding:"12px 16px",textAlign:"center"}}>{r.cases} 人</td>
-                          <td style={{padding:"12px 16px",textAlign:"center",color:"#64748b"}}>{serviceStats.totalDays>0?`${Math.round(r.days/serviceStats.totalDays*100)}%`:"-"}</td>
-                        </tr>
-                      ))}
-                      <tr style={{background:"#f8fafc",fontWeight:700}}>
-                        <td style={{padding:"12px 16px",textAlign:"center"}}>合計</td>
-                        <td style={{padding:"12px 16px",textAlign:"center",fontSize:18,color:"#1d4ed8"}}>{serviceStats.totalDays} 次</td>
-                        <td style={{padding:"12px 16px",textAlign:"center"}}>{serviceStats.totalCases} 人</td>
-                        <td style={{padding:"12px 16px",textAlign:"center"}}>100%</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                  <div style={{marginTop:20}}>
-                    <ResponsiveContainer width="100%" height={200}>
-                      <BarChart data={[{name:"女性 (F)",人次:serviceStats.female.days,個案數:serviceStats.female.cases},{name:"男性 (M)",人次:serviceStats.male.days,個案數:serviceStats.male.cases}]}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/>
-                        <XAxis dataKey="name" tick={{fontSize:13}}/><YAxis tick={{fontSize:11}}/><Tooltip/><Legend/>
-                        <Bar dataKey="人次" fill="#be185d" opacity={0.85}/>
-                        <Bar dataKey="個案數" fill="#0891b2" opacity={0.85}/>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      );
-    }
+            tab==="district"&&(stats.distData.length===0
+              ?React.createElement('div',{style:{color:"#94a3b8",textAlign:"center",padding:40}},"無地區資料")
+              :React.createElement(ChartCanvas,{type:"bar",
+                data:{labels:stats.distData.map(d=>d.name),datasets:[{label:"人數",data:stats.distData.map(d=>d.value),backgroundColor:"#d97706"}]},
+                options:{plugins:{legend:{display:false}}}
+              })
+            )
+          )
+        ),
 
-    ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
-  </script>
+        // AI
+        React.createElement('div',{style:{background:"white",borderRadius:12,padding:24,border:"1px solid #e2e8f0",marginBottom:20}},
+          React.createElement('div',{style:{fontWeight:600,marginBottom:10,fontSize:15}},"🤖 AI 分析（僅傳統計摘要，不含個資）"),
+          React.createElement('textarea',{value:question,onChange:e=>setQuestion(e.target.value),rows:3,style:{width:"100%",border:"1px solid #cbd5e1",borderRadius:8,padding:"10px 12px",fontSize:13,resize:"vertical"}}),
+          React.createElement('button',{onClick:onAnalyze,disabled:loading,style:{marginTop:10,background:loading?"#94a3b8":"#2563eb",color:"white",border:"none",borderRadius:8,padding:"10px 24px",fontSize:14,fontWeight:600,cursor:loading?"not-allowed":"pointer"}},loading?"⏳ 分析中…":"🤖 送出 AI 分析"),
+          aiResult&&React.createElement('div',{style:{marginTop:16,background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:8,padding:16,fontSize:13,lineHeight:1.8,whiteSpace:"pre-wrap"}},
+            React.createElement('div',{style:{fontWeight:600,color:"#0369a1",marginBottom:8}},"AI 分析結果"),aiResult)
+        )
+      ),
+
+      // 服務人次
+      serviceStats&&React.createElement('div',{style:{background:"white",borderRadius:12,border:"1px solid #e2e8f0",marginTop:20}},
+        React.createElement('div',{style:{borderBottom:"1px solid #e2e8f0",padding:"16px 20px",fontWeight:700,fontSize:15}},
+          "🗓 服務人次統計 ",React.createElement('span',{style:{fontSize:12,color:"#64748b",fontWeight:400}},fileNames.service)
+        ),
+        React.createElement('div',{style:{padding:20}},
+          activeNames.size>0&&serviceRows&&(()=>{
+            const sNames=new Set(serviceRows.map(r=>normN(String(r["服務個案"]||""))).filter(Boolean));
+            const notService=[...activeNames].filter(n=>!sNames.has(n));
+            const notActive=[...sNames].filter(n=>![...activeNames].some(a=>normN(a)===n));
+            return React.createElement('div',{style:{marginBottom:20,background:"#fefce8",border:"1px solid #fde68a",borderRadius:8,padding:16}},
+              React.createElement('div',{style:{fontWeight:600,fontSize:13,marginBottom:10,color:"#92400e"}},"🔍 個案姓名比對（本地運算，資料不外傳）"),
+              React.createElement('div',{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}},
+                React.createElement('div',null,
+                  React.createElement('div',{style:{fontSize:12,fontWeight:600,color:"#dc2626",marginBottom:6}},`在案但當月無服務紀錄（${notService.length}人）`),
+                  notService.length===0
+                    ?React.createElement('div',{style:{fontSize:12,color:"#16a34a"}},"✅ 所有在案個案均有服務紀錄")
+                    :React.createElement('div',{style:{fontSize:12,lineHeight:1.8}},
+                        ...notService.map((n,i)=>React.createElement('span',{key:i,style:{display:"inline-block",background:"#fee2e2",borderRadius:4,padding:"2px 8px",margin:"2px",color:"#dc2626"}},n))
+                      )
+                ),
+                React.createElement('div',null,
+                  React.createElement('div',{style:{fontSize:12,fontWeight:600,color:"#d97706",marginBottom:6}},`服務明細有但不在在案名單（${notActive.length}人）`),
+                  notActive.length===0
+                    ?React.createElement('div',{style:{fontSize:12,color:"#16a34a"}},"✅ 無異常")
+                    :React.createElement('div',{style:{fontSize:12,lineHeight:1.8}},
+                        ...notActive.map((n,i)=>React.createElement('span',{key:i,style:{display:"inline-block",background:"#fef3c7",borderRadius:4,padding:"2px 8px",margin:"2px",color:"#d97706"}},n))
+                      )
+                )
+              )
+            );
+          })(),
+          React.createElement('div',{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:20}},
+            ...[
+              {label:"總服務人次",value:`${serviceStats.total} 次`,color:"#1d4ed8"},
+              {label:"服務總個案數",value:`${serviceStats.totalCases} 人`,color:"#7c3aed"},
+              {label:"女性人次/個案",value:`${serviceStats.female.days}次/${serviceStats.female.cases}人`,color:"#be185d"},
+              {label:"男性人次/個案",value:`${serviceStats.male.days}次/${serviceStats.male.cases}人`,color:"#0891b2"},
+            ].map((k,i)=>React.createElement('div',{key:i,style:{background:"#f8fafc",borderRadius:10,padding:16,border:"1px solid #e2e8f0",textAlign:"center"}},
+              React.createElement('div',{style:{fontSize:12,color:"#64748b",marginBottom:6}},k.label),
+              React.createElement('div',{style:{fontSize:18,fontWeight:700,color:k.color}},k.value)
+            ))
+          ),
+          React.createElement('table',{style:{width:"100%",borderCollapse:"collapse",fontSize:13}},
+            React.createElement('thead',null,React.createElement('tr',{style:{background:"#f1f5f9"}},
+              ...["性別","服務人次","服務個案數","佔總人次%"].map(h=>React.createElement('th',{key:h,style:{padding:"10px 16px",textAlign:"center",borderBottom:"2px solid #e2e8f0",fontWeight:600,color:"#475569"}},h))
+            )),
+            React.createElement('tbody',null,
+              ...[{g:"女性 (F)",days:serviceStats.female.days,cases:serviceStats.female.cases,color:"#be185d"},{g:"男性 (M)",days:serviceStats.male.days,cases:serviceStats.male.cases,color:"#0891b2"}].map((r,i)=>
+                React.createElement('tr',{key:i,style:{borderBottom:"1px solid #f1f5f9"}},
+                  React.createElement('td',{style:{padding:"12px 16px",textAlign:"center",fontWeight:700,color:r.color}},r.g),
+                  React.createElement('td',{style:{padding:"12px 16px",textAlign:"center",fontSize:18,fontWeight:700}},`${r.days} 次`),
+                  React.createElement('td',{style:{padding:"12px 16px",textAlign:"center"}},`${r.cases} 人`),
+                  React.createElement('td',{style:{padding:"12px 16px",textAlign:"center",color:"#64748b"}},serviceStats.total>0?`${Math.round(r.days/serviceStats.total*100)}%`:"-")
+                )
+              ),
+              React.createElement('tr',{style:{background:"#f8fafc",fontWeight:700}},
+                React.createElement('td',{style:{padding:"12px 16px",textAlign:"center"}},"合計"),
+                React.createElement('td',{style:{padding:"12px 16px",textAlign:"center",fontSize:18,color:"#1d4ed8"}},`${serviceStats.total} 次`),
+                React.createElement('td',{style:{padding:"12px 16px",textAlign:"center"}},`${serviceStats.totalCases} 人`),
+                React.createElement('td',{style:{padding:"12px 16px",textAlign:"center"}},"100%")
+              )
+            )
+          ),
+          React.createElement(ChartCanvas,{type:"bar",h:200,
+            data:{labels:["女性 (F)","男性 (M)"],datasets:[
+              {label:"人次",data:[serviceStats.female.days,serviceStats.male.days],backgroundColor:["#be185d","#0891b2"]},
+              {label:"個案數",data:[serviceStats.female.cases,serviceStats.male.cases],backgroundColor:["rgba(190,24,93,0.3)","rgba(8,145,178,0.3)"]}
+            ]},
+            options:{plugins:{legend:{position:"bottom"}}}
+          })
+        )
+      )
+    )
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
+</script>
 </body>
 </html>
