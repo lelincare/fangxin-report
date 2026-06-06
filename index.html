@@ -134,6 +134,11 @@ function App(){
   const [serviceStats,setServiceStats]=useState(null);
   const [activeNames,setActiveNames]=useState(new Set());
   const [closedNames,setClosedNames]=useState(new Set());
+  const [activeRaw,setActiveRaw]=useState([]);
+  const [showNewCases,setShowNewCases]=useState(false);
+  const [showActive,setShowActive]=useState(false);
+  const [showClosed,setShowClosed]=useState(false);
+  const [closedRaw,setClosedRaw]=useState([]);
   const [fileNames,setFileNames]=useState({active:"",closed:"",service:""});
   const [tab,setTab]=useState("trend");
 
@@ -152,6 +157,7 @@ setFileNames(p=>({...p,active:aName,closed:cName}));
       const ws=wb.Sheets[wb.SheetNames[0]];
       const raw=XLSX.utils.sheet_to_json(ws,{defval:"",range:1});
       setActiveNames(new Set(raw.map(r=>normN(r["姓名"]||"")).filter(Boolean)));
+      setActiveRaw(raw);
       process(anonymize(raw),closedRows||[],f.name,fileNames.closed);
     };r.readAsArrayBuffer(f);
   },[closedRows,fileNames.closed,process]);
@@ -163,6 +169,7 @@ setFileNames(p=>({...p,active:aName,closed:cName}));
       const ws=wb.Sheets[wb.SheetNames[0]];
       const raw=XLSX.utils.sheet_to_json(ws,{defval:"",range:1});
       setClosedNames(new Set(raw.map(r=>normN(r["姓名"]||"")).filter(Boolean)));
+      setClosedRaw(raw);
       process(activeRows||[],anonymize(raw),fileNames.active,f.name);
     };r.readAsArrayBuffer(f);
   },[activeRows,fileNames.active,process]);
@@ -243,10 +250,93 @@ CMS：${Object.entries(stats.cmsCount).filter(([k])=>k&&k!=="未知").map(([k,v]
       stats&&React.createElement(React.Fragment,null,
         dataMonth&&React.createElement('div',{style:{marginBottom:8,fontSize:13,color:"#2563eb",fontWeight:600}},`📅 資料月份：${dataMonth}`),
         React.createElement('div',{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:20}},
-          card("總個案數（不含結案）",activeNames.size||0,"#2563eb"),
-          card("累積結案數（至今）",closedNames.size||0,"#dc2626"),
-          card("本月新增",trend.length>0?trend[trend.length-1].新增:0,"#16a34a")
+          React.createElement('div',{style:{background:"white",borderRadius:10,padding:16,border:"1px solid #e2e8f0",cursor:"pointer"},onClick:()=>setShowActive(v=>!v)},
+            React.createElement('div',{style:{fontSize:12,color:"#64748b",marginBottom:6}},"總個案數（不含結案） "+(showActive?"▲":"▼")),
+            React.createElement('div',{style:{fontSize:26,fontWeight:700,color:"#2563eb"}},activeNames.size||0)
+          ),
+          React.createElement('div',{style:{background:"white",borderRadius:10,padding:16,border:"1px solid #e2e8f0",cursor:"pointer"},onClick:()=>setShowClosed(v=>!v)},
+            React.createElement('div',{style:{fontSize:12,color:"#64748b",marginBottom:6}},"累積結案數（至今） "+(showClosed?"▲":"▼")),
+            React.createElement('div',{style:{fontSize:26,fontWeight:700,color:"#dc2626"}},closedNames.size||0)
+          ),
+          React.createElement('div',{style:{background:"white",borderRadius:10,padding:16,border:"1px solid #e2e8f0",cursor:"pointer"},onClick:()=>setShowNewCases(v=>!v)},
+            React.createElement('div',{style:{fontSize:12,color:"#64748b",marginBottom:6}},"本月新增 "+(showNewCases?"▲":"▼")),
+            React.createElement('div',{style:{fontSize:26,fontWeight:700,color:"#16a34a"}},trend.length>0?trend[trend.length-1].新增:0)
+          )
         ),
+
+        showActive&&(()=>{
+          const cases=activeRaw;
+          return React.createElement('div',{style:{background:"white",borderRadius:12,border:"1px solid #e2e8f0",marginBottom:20,padding:20}},
+            React.createElement('div',{style:{fontWeight:600,fontSize:14,marginBottom:12,color:"#2563eb"}},"📋 在案個案清單（"+cases.length+"人）"),
+            React.createElement('table',{style:{width:"100%",borderCollapse:"collapse",fontSize:13}},
+              React.createElement('thead',null,React.createElement('tr',{style:{background:"#f8fafc"}},
+                ...["姓名","性別","CMS等級","年齡","鄉鎮區"].map(h=>React.createElement('th',{key:h,style:{padding:"8px 12px",textAlign:"center",borderBottom:"1px solid #e2e8f0",color:"#475569",fontWeight:600}},h))
+              )),
+              React.createElement('tbody',null,...cases.map((r,i)=>{
+                const age=calcAge(r["生日"]);
+                return React.createElement('tr',{key:i,style:{borderBottom:"1px solid #f1f5f9"}},
+                  React.createElement('td',{style:{padding:"8px 12px",textAlign:"center",fontWeight:600}},r["姓名"]||"-"),
+                  React.createElement('td',{style:{padding:"8px 12px",textAlign:"center"}},r["性別"]||"-"),
+                  React.createElement('td',{style:{padding:"8px 12px",textAlign:"center"}},r["CMS等級"]||"-"),
+                  React.createElement('td',{style:{padding:"8px 12px",textAlign:"center"}},age?age+"歲":"-"),
+                  React.createElement('td',{style:{padding:"8px 12px",textAlign:"center"}},r["通訊鄉鎮區"]||"-")
+                );
+              }))
+            )
+          );
+        })(),
+
+        showClosed&&(()=>{
+          const cases=closedRaw;
+          return React.createElement('div',{style:{background:"white",borderRadius:12,border:"1px solid #e2e8f0",marginBottom:20,padding:20}},
+            React.createElement('div',{style:{fontWeight:600,fontSize:14,marginBottom:12,color:"#dc2626"}},"📋 結案個案清單（"+cases.length+"人）"),
+            React.createElement('table',{style:{width:"100%",borderCollapse:"collapse",fontSize:13}},
+              React.createElement('thead',null,React.createElement('tr',{style:{background:"#f8fafc"}},
+                ...["姓名","性別","CMS等級","年齡","鄉鎮區","結案日期","結案原因"].map(h=>React.createElement('th',{key:h,style:{padding:"8px 12px",textAlign:"center",borderBottom:"1px solid #e2e8f0",color:"#475569",fontWeight:600}},h))
+              )),
+              React.createElement('tbody',null,...cases.map((r,i)=>{
+                const age=calcAge(r["生日"]);
+                return React.createElement('tr',{key:i,style:{borderBottom:"1px solid #f1f5f9"}},
+                  React.createElement('td',{style:{padding:"8px 12px",textAlign:"center",fontWeight:600}},r["姓名"]||"-"),
+                  React.createElement('td',{style:{padding:"8px 12px",textAlign:"center"}},r["性別"]||"-"),
+                  React.createElement('td',{style:{padding:"8px 12px",textAlign:"center"}},r["CMS等級"]||"-"),
+                  React.createElement('td',{style:{padding:"8px 12px",textAlign:"center"}},age?age+"歲":"-"),
+                  React.createElement('td',{style:{padding:"8px 12px",textAlign:"center"}},r["通訊鄉鎮區"]||"-"),
+                  React.createElement('td',{style:{padding:"8px 12px",textAlign:"center"}},String(r["結束(暫停)服務日期"]||"").slice(0,10)||"-"),
+                  React.createElement('td',{style:{padding:"8px 12px",textAlign:"center"}},r["結案(暫停)原因"]||"-")
+                );
+              }))
+            )
+          );
+        })(),
+
+        showNewCases&&(()=>{
+          const lastM=trend.length>0?trend[trend.length-1].month:null;
+          if(!lastM)return null;
+          const newCases=activeRaw.filter(r=>{
+            const d=parseDate(r["開案日期"]);
+            return d&&(d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"))===lastM;
+          });
+          return React.createElement('div',{style:{background:"white",borderRadius:12,border:"1px solid #bbf7d0",marginBottom:20,padding:20}},
+            React.createElement('div',{style:{fontWeight:600,fontSize:14,marginBottom:12,color:"#16a34a"}},"📋 "+lastM+" 新增個案（"+newCases.length+"人）"),
+            React.createElement('table',{style:{width:"100%",borderCollapse:"collapse",fontSize:13}},
+              React.createElement('thead',null,React.createElement('tr',{style:{background:"#f8fafc"}},
+                ...["姓名","開案日期","性別","CMS等級","年齡","鄉鎮區"].map(h=>React.createElement('th',{key:h,style:{padding:"8px 12px",textAlign:"center",borderBottom:"1px solid #e2e8f0",color:"#475569",fontWeight:600}},h))
+              )),
+              React.createElement('tbody',null,...newCases.map((r,i)=>{
+                const age=calcAge(r["生日"]);
+                return React.createElement('tr',{key:i,style:{borderBottom:"1px solid #f1f5f9"}},
+                  React.createElement('td',{style:{padding:"8px 12px",textAlign:"center",fontWeight:600}},r["姓名"]||"-"),
+                  React.createElement('td',{style:{padding:"8px 12px",textAlign:"center"}},String(r["開案日期"]||"").slice(0,10)),
+                  React.createElement('td',{style:{padding:"8px 12px",textAlign:"center"}},r["性別"]||"-"),
+                  React.createElement('td',{style:{padding:"8px 12px",textAlign:"center"}},r["CMS等級"]||"-"),
+                  React.createElement('td',{style:{padding:"8px 12px",textAlign:"center"}},age?age+"歲":"-"),
+                  React.createElement('td',{style:{padding:"8px 12px",textAlign:"center"}},r["通訊鄉鎮區"]||"-")
+                );
+              }))
+            )
+          );
+        })(),
 
         // Tabs
         React.createElement('div',{style:{background:"white",borderRadius:12,border:"1px solid #e2e8f0",marginBottom:20}},
