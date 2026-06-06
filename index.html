@@ -264,11 +264,10 @@ CMS：${Object.entries(stats.cmsCount).filter(([k])=>k&&k!=="未知").map(([k,v]
           )
         ),
 
-        showActive?(()=>{
-          // 姓名去重，同名只取第一筆
+        (()=>{
           const seen=new Set();
           const cases=activeRaw.filter(r=>{const n=normN(r["姓名"]||"");if(!n||seen.has(n))return false;seen.add(n);return true;});
-          return React.createElement('div',{style:{background:"white",borderRadius:12,border:"1px solid #e2e8f0",marginBottom:20,padding:20}},
+          return React.createElement('div',{style:{background:"white",borderRadius:12,border:"1px solid #e2e8f0",marginBottom:20,padding:20,display:showActive?"block":"none"}},
             React.createElement('div',{style:{fontWeight:600,fontSize:14,marginBottom:12,color:"#2563eb"}},"📋 在案個案清單（"+cases.length+"人）"),
             React.createElement('table',{style:{width:"100%",borderCollapse:"collapse",fontSize:13}},
               React.createElement('thead',null,React.createElement('tr',{style:{background:"#f8fafc"}},
@@ -286,12 +285,12 @@ CMS：${Object.entries(stats.cmsCount).filter(([k])=>k&&k!=="未知").map(([k,v]
               }))
             )
           );
-        })()):null,
+        })():[]),
 
-        showClosed?(()=>{
+        (()=>{
           const seen2=new Set();
           const cases=closedRaw.filter(r=>{const n=normN(r["姓名"]||"");if(!n||seen2.has(n))return false;seen2.add(n);return true;});
-          return React.createElement('div',{style:{background:"white",borderRadius:12,border:"1px solid #e2e8f0",marginBottom:20,padding:20}},
+          return React.createElement('div',{style:{background:"white",borderRadius:12,border:"1px solid #e2e8f0",marginBottom:20,padding:20,display:showClosed?"block":"none"}},
             React.createElement('div',{style:{fontWeight:600,fontSize:14,marginBottom:12,color:"#dc2626"}},"📋 結案個案清單（"+cases.length+"人）"),
             React.createElement('table',{style:{width:"100%",borderCollapse:"collapse",fontSize:13}},
               React.createElement('thead',null,React.createElement('tr',{style:{background:"#f8fafc"}},
@@ -311,16 +310,16 @@ CMS：${Object.entries(stats.cmsCount).filter(([k])=>k&&k!=="未知").map(([k,v]
               }))
             )
           );
-        })()):null,
+        })(),
 
-        showNewCases?(()=>{
+        (()=>{
           const lastM=trend.length>0?trend[trend.length-1].month:null;
           if(!lastM)return null;
           const newCases=activeRaw.filter(r=>{
             const d=parseDate(r["開案日期"]);
             return d&&(d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"))===lastM;
           });
-          return React.createElement('div',{style:{background:"white",borderRadius:12,border:"1px solid #bbf7d0",marginBottom:20,padding:20}},
+          return React.createElement('div',{style:{background:"white",borderRadius:12,border:"1px solid #bbf7d0",marginBottom:20,padding:20,display:showNewCases?"block":"none"}},
             React.createElement('div',{style:{fontWeight:600,fontSize:14,marginBottom:12,color:"#16a34a"}},"📋 "+lastM+" 新增個案（"+newCases.length+"人）"),
             React.createElement('table',{style:{width:"100%",borderCollapse:"collapse",fontSize:13}},
               React.createElement('thead',null,React.createElement('tr',{style:{background:"#f8fafc"}},
@@ -339,7 +338,7 @@ CMS：${Object.entries(stats.cmsCount).filter(([k])=>k&&k!=="未知").map(([k,v]
               }))
             )
           );
-        })()):null,
+        })(),
 
         // Tabs
         React.createElement('div',{style:{background:"white",borderRadius:12,border:"1px solid #e2e8f0",marginBottom:20}},
