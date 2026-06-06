@@ -264,7 +264,7 @@ CMS：${Object.entries(stats.cmsCount).filter(([k])=>k&&k!=="未知").map(([k,v]
           )
         ),
 
-        showActive&&(()=>{
+        showActive?(()=>{
           const cases=activeRaw;
           return React.createElement('div',{style:{background:"white",borderRadius:12,border:"1px solid #e2e8f0",marginBottom:20,padding:20}},
             React.createElement('div',{style:{fontWeight:600,fontSize:14,marginBottom:12,color:"#2563eb"}},"📋 在案個案清單（"+cases.length+"人）"),
@@ -284,9 +284,9 @@ CMS：${Object.entries(stats.cmsCount).filter(([k])=>k&&k!=="未知").map(([k,v]
               }))
             )
           );
-        })(),
+        })()):null,
 
-        showClosed&&(()=>{
+        showClosed?(()=>{
           const cases=closedRaw;
           return React.createElement('div',{style:{background:"white",borderRadius:12,border:"1px solid #e2e8f0",marginBottom:20,padding:20}},
             React.createElement('div',{style:{fontWeight:600,fontSize:14,marginBottom:12,color:"#dc2626"}},"📋 結案個案清單（"+cases.length+"人）"),
@@ -308,9 +308,9 @@ CMS：${Object.entries(stats.cmsCount).filter(([k])=>k&&k!=="未知").map(([k,v]
               }))
             )
           );
-        })(),
+        })()):null,
 
-        showNewCases&&(()=>{
+        showNewCases?(()=>{
           const lastM=trend.length>0?trend[trend.length-1].month:null;
           if(!lastM)return null;
           const newCases=activeRaw.filter(r=>{
@@ -336,7 +336,7 @@ CMS：${Object.entries(stats.cmsCount).filter(([k])=>k&&k!=="未知").map(([k,v]
               }))
             )
           );
-        })(),
+        })()):null,
 
         // Tabs
         React.createElement('div',{style:{background:"white",borderRadius:12,border:"1px solid #e2e8f0",marginBottom:20}},
