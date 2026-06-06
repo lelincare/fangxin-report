@@ -136,15 +136,13 @@ function App(){
   const [closedNames,setClosedNames]=useState(new Set());
   const [fileNames,setFileNames]=useState({active:"",closed:"",service:""});
   const [tab,setTab]=useState("trend");
-  const [aiResult,setAiResult]=useState("");
-  const [question,setQuestion]=useState("請分析個案數據的主要趨勢，針對在案人數變化、男女比例及CMS等級分佈提供管理建議。");
-  const [loading,setLoading]=useState(false);
+
 
   const process=useCallback((aRows,cRows,aName,cName)=>{
     const all=[...aRows,...cRows];
     setActiveRows(aRows);setClosedRows(cRows);
     setStats(computeStats(all));setTrend(buildMonthlyActive(all));
-    setAiResult("");setFileNames(p=>({...p,active:aName,closed:cName}));
+setFileNames(p=>({...p,active:aName,closed:cName}));
   },[]);
 
   const onActive=useCallback(e=>{
@@ -244,11 +242,10 @@ CMS：${Object.entries(stats.cmsCount).filter(([k])=>k&&k!=="未知").map(([k,v]
       // KPI + Charts
       stats&&React.createElement(React.Fragment,null,
         dataMonth&&React.createElement('div',{style:{marginBottom:8,fontSize:13,color:"#2563eb",fontWeight:600}},`📅 資料月份：${dataMonth}`),
-        React.createElement('div',{style:{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:20}},
+        React.createElement('div',{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:20}},
           card("總個案數（不含結案）",activeNames.size||0,"#2563eb"),
           card("累積結案數（至今）",closedNames.size||0,"#dc2626"),
-          card("本月新增",trend.length>0?trend[trend.length-1].新增:0,"#16a34a"),
-          card("月底在案總數",trend.length>0?trend[trend.length-1].在案總數:0,"#7c3aed")
+          card("本月新增",trend.length>0?trend[trend.length-1].新增:0,"#16a34a")
         ),
 
         // Tabs
@@ -347,14 +344,7 @@ CMS：${Object.entries(stats.cmsCount).filter(([k])=>k&&k!=="未知").map(([k,v]
           )
         ),
 
-        // AI
-        React.createElement('div',{style:{background:"white",borderRadius:12,padding:24,border:"1px solid #e2e8f0",marginBottom:20}},
-          React.createElement('div',{style:{fontWeight:600,marginBottom:10,fontSize:15}},"🤖 AI 分析（僅傳統計摘要，不含個資）"),
-          React.createElement('textarea',{value:question,onChange:e=>setQuestion(e.target.value),rows:3,style:{width:"100%",border:"1px solid #cbd5e1",borderRadius:8,padding:"10px 12px",fontSize:13,resize:"vertical"}}),
-          React.createElement('button',{onClick:onAnalyze,disabled:loading,style:{marginTop:10,background:loading?"#94a3b8":"#2563eb",color:"white",border:"none",borderRadius:8,padding:"10px 24px",fontSize:14,fontWeight:600,cursor:loading?"not-allowed":"pointer"}},loading?"⏳ 分析中…":"🤖 送出 AI 分析"),
-          aiResult&&React.createElement('div',{style:{marginTop:16,background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:8,padding:16,fontSize:13,lineHeight:1.8,whiteSpace:"pre-wrap"}},
-            React.createElement('div',{style:{fontWeight:600,color:"#0369a1",marginBottom:8}},"AI 分析結果"),aiResult)
-        )
+
       ),
 
       // 服務人次
